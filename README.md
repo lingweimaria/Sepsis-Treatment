@@ -142,7 +142,7 @@ python preprocessing_scripts/sepsis_data_preprocessing.py
   1. 基于真实临床指南的约束
 
   ### 更精准的危险组合
-  血管加压药 + 降压药     # 相互抵消
+  血管加压药 + 降压药：相互抵消
   利尿剂 + 大量电解质     # 电解质紊乱  
   镇痛剂 + 镇静剂       # 过度镇静
 
@@ -156,9 +156,9 @@ python preprocessing_scripts/sepsis_data_preprocessing.py
   3. 权重重新平衡
 
   #### 新权重分配
-  专家模仿(SL): 40%    # 主要指导
-  强化学习(RL): 原权重   # 探索优化
-  安全约束: 5%         # 辅助保护 (降低从10%)
+  专家模仿(SL): 40%    
+  强化学习(RL): 原权重   
+  安全约束: 5% ：辅助保护 (降低从10%)
 
   🎯 设计理念
 
