@@ -1,0 +1,40 @@
+{
+  "timestamp": "2025-06-01T21:47:29.149228",
+  "data_availability": {
+    "time series variables(vital signs)_mimic3.csv": {
+      "exists": true,
+      "size_mb": 833.9223318099976
+    },
+    "top 1000 medications_mimic3.csv": {
+      "exists": true,
+      "size_mb": 628.3131608963013
+    },
+    "time series variables(output)_mimic3.csv": {
+      "exists": true,
+      "size_mb": 55.920228004455566
+    },
+    "filtered_static_ts.csv": {
+      "exists": true,
+      "size_mb": 17.3393497467041
+    }
+  },
+  "extraction_results": {
+    "lab_data_records": 22121,
+    "vasopressor_records": 61407,
+    "urine_output_records": 300000
+  },
+  "sofa_completeness": {
+    "respiratory": "Partial (SpO2/FiO2 available)",
+    "coagulation": "Missing (需要LABEVENTS表)",
+    "liver": "Missing (需要LABEVENTS表)",
+    "cardiovascular": "Partial (MAP + vasopressors)",
+    "cns": "Complete (GCS available)",
+    "renal": "Partial (creatinine + limited urine)"
+  },
+  "recommendations": [
+    "获取完整的MIMIC-III LABEVENTS表以实现完整SOFA评分",
+    "当前可实现4/6个SOFA子系统的部分或完整计算",
+    "建议使用替代指标进行近似计算",
+    "考虑联系MIMIC数据管理员获取完整数据访问权限"
+  ]
+}
