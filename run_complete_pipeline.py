@@ -138,6 +138,88 @@ class SepsisDataPipeline:
             self.log(f"❌ SOFA评分计算异常: {e}")
             return False
     
+    def generate_expert_data(self):
+        """生成专家决策数据用于监督学习"""
+        self.log("🔄 生成专家决策数据...")
+        
+        try:
+            # 检查是否已有训练数据
+            final_data_dir = self.processed_data_dir / "final"
+            train_features_path = final_data_dir / "train_features.npy"
+            
+            if not train_features_path.exists():
+                self.log("❌ 训练数据不存在，无法生成专家数据")
+                return False
+            
+            # 加载训练数据
+            train_features = np.load(train_features_path)
+            self.log(f"✅ 加载训练数据: {train_features.shape}")
+            
+            # 生成专家决策数据
+            expert_data = []
+            for i, sequence in enumerate(train_features):
+                # 重塑序列数据
+                if len(sequence.shape) == 1:
+                    # 假设序列长度为7
+                    sequence = sequence.reshape(7, -1)
+                
+                # 获取最后一个时间步的状态
+                final_state = sequence[-1]
+                
+                # 基于医学规则生成专家决策
+                expert_action = self.generate_expert_action(final_state)
+                
+                # 组合状态和动作
+                expert_sample = {
+                    'state_features': final_state.tolist(),
+                    'expert_action': expert_action,
+                    'sequence_id': i
+                }
+                expert_data.append(expert_sample)
+            
+            # 保存专家数据
+            expert_data_dir = self.processed_data_dir / "expert_data"
+            expert_data_dir.mkdir(exist_ok=True)
+            
+            expert_df = pd.DataFrame(expert_data)
+            expert_data_path = expert_data_dir / "expert_decisions.csv"
+            expert_df.to_csv(expert_data_path, index=False)
+            
+            self.log(f"✅ 专家数据已保存: {expert_data_path}")
+            self.log(f"   专家样本数量: {len(expert_data)}")
+            
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ 生成专家数据异常: {e}")
+            return False
+    
+    def generate_expert_action(self, state_features):
+        """基于医学规则生成专家动作"""
+        # 假设状态特征的顺序：[temp, hr, resp_rate, bp_sys, bp_dias, spo2, ...]
+        if len(state_features) < 6:
+            return 0  # 默认观察动作
+        
+        temp = state_features[0]      # 体温
+        hr = state_features[1]        # 心率
+        bp_sys = state_features[3]    # 收缩压
+        bp_dias = state_features[4]   # 舒张压
+        spo2 = state_features[5]      # 氧饱和度
+        
+        # 专家决策规则
+        if temp > 38.5:
+            return 1  # 降温治疗
+        elif hr > 100:
+            return 2  # 心率控制
+        elif bp_sys < 90:
+            return 3  # 升压治疗
+        elif bp_sys > 140:
+            return 4  # 降压治疗
+        elif spo2 < 92:
+            return 5  # 氧疗
+        else:
+            return 0  # 观察/维持治疗
+
     def validate_output_data(self):
         """验证输出数据"""
         self.log("🔍 验证输出数据...")
@@ -207,6 +289,28 @@ class SepsisDataPipeline:
                 validation_results['enhanced_sofa_dataset.csv'] = {'exists': False}
                 self.log("❌ 缺少SOFA数据集文件")
         
+        # 检查专家数据
+        expert_data_dir = self.processed_data_dir / "expert_data"
+        if expert_data_dir.exists():
+            expert_decisions_path = expert_data_dir / "expert_decisions.csv"
+            if expert_decisions_path.exists():
+                try:
+                    expert_data = pd.read_csv(expert_decisions_path)
+                    validation_results['expert_decisions.csv'] = {
+                        'exists': True,
+                        'shape': expert_data.shape,
+                        'columns': list(expert_data.columns),
+                        'action_distribution': expert_data['expert_action'].value_counts().to_dict()
+                    }
+                    self.log(f"✅ 专家决策数据: shape={expert_data.shape}")
+                    self.log(f"   动作分布: {expert_data['expert_action'].value_counts().to_dict()}")
+                except Exception as e:
+                    validation_results['expert_decisions.csv'] = {'exists': True, 'error': str(e)}
+                    self.log(f"❌ 专家数据读取错误: {e}")
+            else:
+                validation_results['expert_decisions.csv'] = {'exists': False}
+                self.log("❌ 缺少专家决策数据文件")
+        
         # 保存验证结果
         validation_report_path = self.base_dir / "data_validation_report.json"
         with open(validation_report_path, 'w', encoding='utf-8') as f:
@@ -217,6 +321,10 @@ class SepsisDataPipeline:
         # 检查是否有关键文件缺失
         critical_files = ["train_features.npy", "enhanced_sofa_dataset.csv"]
         missing_critical = [f for f in critical_files if not validation_results.get(f, {}).get('exists', False)]
+        
+        # 专家数据是可选的，但会发出警告
+        if not validation_results.get('expert_decisions.csv', {}).get('exists', False):
+            self.log("⚠️ 缺少专家决策数据，混合RL+SL训练将使用模拟专家数据")
         
         if missing_critical:
             self.log(f"❌ 缺少关键文件: {missing_critical}")
@@ -284,6 +392,26 @@ class SepsisDataPipeline:
                 except:
                     report_content.append("- enhanced_sofa_dataset.csv: 读取失败")
         
+        # 专家决策数据
+        expert_data_dir = self.processed_data_dir / "expert_data"
+        if expert_data_dir.exists():
+            report_content.append("#### 专家决策数据")
+            expert_decisions_path = expert_data_dir / "expert_decisions.csv"
+            if expert_decisions_path.exists():
+                try:
+                    expert_data = pd.read_csv(expert_decisions_path)
+                    report_content.append(f"- expert_decisions.csv: {expert_data.shape[0]} 行, {expert_data.shape[1]} 列")
+                    
+                    # 专家动作分布统计
+                    if 'expert_action' in expert_data.columns:
+                        action_counts = expert_data['expert_action'].value_counts()
+                        report_content.append("  - 动作分布:")
+                        for action, count in action_counts.items():
+                            percentage = (count / len(expert_data)) * 100
+                            report_content.append(f"    - 动作{action}: {count} ({percentage:.1f}%)")
+                except:
+                    report_content.append("- expert_decisions.csv: 读取失败")
+        
         # 处理脚本
         report_content.append("## 使用的处理脚本")
         if self.scripts_dir.exists():
@@ -295,9 +423,10 @@ class SepsisDataPipeline:
         report_content.append("1. 原始MIMIC-III数据导入")
         report_content.append("2. 基础数据预处理和清洗")
         report_content.append("3. SOFA评分计算")
-        report_content.append("4. 特征工程和序列构建")
-        report_content.append("5. 训练/验证/测试数据分割")
-        report_content.append("6. 数据验证和质量检查")
+        report_content.append("4. 专家决策数据生成 (用于混合RL+SL训练)")
+        report_content.append("5. 特征工程和序列构建")
+        report_content.append("6. 训练/验证/测试数据分割")
+        report_content.append("7. 数据验证和质量检查")
         
         # 保存报告
         report_path = self.base_dir / "pipeline_summary_report.md"
@@ -325,11 +454,15 @@ class SepsisDataPipeline:
             self.log("❌ SOFA计算失败，流水线停止")
             return False
         
-        # 4. 验证输出数据
+        # 4. 生成专家决策数据
+        if not self.generate_expert_data():
+            self.log("⚠️ 专家数据生成失败，但流水线继续")
+        
+        # 5. 验证输出数据
         if not self.validate_output_data():
             self.log("❌ 数据验证失败，但流水线继续")
         
-        # 5. 生成总结报告
+        # 6. 生成总结报告
         self.generate_summary_report()
         
         self.log("🎉 完整数据处理流水线执行完成!")
