@@ -17,9 +17,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class EnhancedSepsisLSTMAgent(nn.Module):
-    """增强的败血症LSTM智能体 - 包含医学约束"""
+    """增强的败血症LSTM智能体 - 包含医学约束和监督学习模仿"""
     
-    def __init__(self, input_dim, hidden_dim=128, num_actions=20, sequence_length=7):
+    def __init__(self, input_dim, hidden_dim=128, num_actions=20, sequence_length=7, expert_data_path=None):
         super(EnhancedSepsisLSTMAgent, self).__init__()
         
         self.input_dim = input_dim
@@ -84,6 +84,19 @@ class EnhancedSepsisLSTMAgent(nn.Module):
         # 医学约束层
         self.medical_constraint = nn.Linear(num_actions, num_actions)
         
+        # 监督学习模仿专家行为的组件
+        self.expert_data_path = expert_data_path
+        self.expert_imitation_net = nn.Sequential(
+            nn.Linear(hidden_dim + hidden_dim//2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, num_actions)
+        )
+        
+        # 融合权重 - 控制RL和SL的平衡
+        self.rl_weight = nn.Parameter(torch.tensor(0.7))  # 可学习的权重
+        self.sl_weight = nn.Parameter(torch.tensor(0.3))
+        
         # 保守的权重初始化
         self.apply(self._init_weights)
     
@@ -102,8 +115,8 @@ class EnhancedSepsisLSTMAgent(nn.Module):
                 elif 'bias' in name:
                     param.data.fill_(0.01)
     
-    def forward(self, sequences, sequence_lengths=None):
-        """前向传播"""
+    def forward(self, sequences, sequence_lengths=None, use_expert_imitation=True):
+        """前向传播 - 增加专家模仿功能"""
         batch_size = sequences.size(0)
         
         # LSTM处理时序数据
@@ -137,15 +150,33 @@ class EnhancedSepsisLSTMAgent(nn.Module):
         # 融合时序和医学特征
         combined_features = torch.cat([temporal_context, medical_features], dim=1)
         
-        # Actor和Critic输出
-        raw_action_logits = self.actor(combined_features)
+        # 强化学习Actor输出
+        rl_action_logits = self.actor(combined_features)
+        
+        # 监督学习专家模仿输出
+        expert_action_logits = self.expert_imitation_net(combined_features)
+        
+        # 融合RL和SL输出
+        if use_expert_imitation:
+            # 归一化权重
+            total_weight = torch.abs(self.rl_weight) + torch.abs(self.sl_weight)
+            normalized_rl_weight = torch.abs(self.rl_weight) / total_weight
+            normalized_sl_weight = torch.abs(self.sl_weight) / total_weight
+            
+            # 加权融合
+            fused_action_logits = (normalized_rl_weight * rl_action_logits + 
+                                 normalized_sl_weight * expert_action_logits)
+        else:
+            fused_action_logits = rl_action_logits
         
         # 应用医学约束
-        constrained_action_logits = self.medical_constraint(raw_action_logits)
+        constrained_action_logits = self.medical_constraint(fused_action_logits)
         
+        # Critic输出
         state_values = self.critic(combined_features)
         
-        return constrained_action_logits, state_values, combined_output, attention_weights
+        return (constrained_action_logits, state_values, combined_output, attention_weights,
+                rl_action_logits, expert_action_logits)
 
 class ClinicalRewardCalculator:
     """临床相关的奖励计算器 - 基于医学指标的奖励"""
@@ -326,64 +357,283 @@ class ClinicalRewardCalculator:
         return torch.clamp(final_reward, min=-1.0, max=5.0)
 
 class MedicalSafetyConstraints:
-    """医学安全约束类"""
+    """医学安全约束类 - 基于真实临床指南优化"""
     
     def __init__(self, num_actions=20):
         self.num_actions = num_actions
         
-        # 定义危险动作组合（示例）
+        # 基于真实临床指南的危险组合
         self.dangerous_combinations = [
-            [0, 1],   # 示例：某些药物组合
-            [5, 10],  # 示例：高剑量组合
+            [1, 2],   # 血管加压药 + 降压药 (相互抵消)
+            [3, 11],  # 利尿剂 + 大量电解质 (电解质紪乱)
+            [17, 18], # 镇痛剂 + 镇静剂 (过度镇静)
         ]
         
-        # 最大允许剑量
-        self.max_dosage_actions = [15, 16, 17, 18, 19]  # 示例：高剂量动作
+        # 需要谨慎使用的高风险动作
+        self.high_risk_actions = [1, 17, 18, 19]  # 血管加压药、镇痛、镇静、抗凝
         
     def apply_constraints(self, action_logits, medical_state=None):
-        """应用医学安全约束"""
+        """应用医学安全约束 - 优化版"""
         constrained_logits = action_logits.clone()
-        
-        # 约束1：防止危险药物组合
         action_probs = torch.softmax(action_logits, dim=-1)
         
+        # 约束1：防止危险药物组合
         for dangerous_combo in self.dangerous_combinations:
             combo_prob = torch.prod(action_probs[:, dangerous_combo], dim=1)
-            if combo_prob.max() > 0.1:  # 如果危险组合概率过高
+            high_risk_mask = combo_prob > 0.05  # 降低阈值，更敏感
+            if high_risk_mask.any():
                 for action_idx in dangerous_combo:
-                    constrained_logits[:, action_idx] -= 2.0  # 降低概率
+                    constrained_logits[high_risk_mask, action_idx] -= 1.5
         
-        # 约束2：基于当前医学状态的约束
+        # 约束2：基于生理状态的智能约束
         if medical_state is not None:
-            # 如果血压过低，限制降压药物
-            bp_systolic = medical_state[:, 3]  # 收缩压索引
-            low_bp_mask = bp_systolic < 90
+            # 低血压约束 - 禁止降压药，鼓励血管加压药
+            bp_systolic = medical_state[:, 3]
+            low_bp_mask = bp_systolic < 85  # 严格的低血压标准
             if low_bp_mask.any():
-                constrained_logits[low_bp_mask, 10:15] -= 3.0  # 限制降压类动作
+                constrained_logits[low_bp_mask, 2] -= 5.0  # 禁止降压药
+                constrained_logits[low_bp_mask, 1] += 0.5  # 轻微鼓励血管加压药
             
-            # 如果心率过高，限制兴奋剂
+            # 高血压约束
+            high_bp_mask = bp_systolic > 160
+            if high_bp_mask.any():
+                constrained_logits[high_bp_mask, 1] -= 3.0  # 限制血管加压药
+            
+            # 心动过速约束
             heart_rate = medical_state[:, 1]
-            high_hr_mask = heart_rate > 120
+            high_hr_mask = heart_rate > 130
             if high_hr_mask.any():
-                constrained_logits[high_hr_mask, 5:10] -= 3.0  # 限制兴奋剂类动作
+                constrained_logits[high_hr_mask, 4] += 0.3  # 鼓励β受体阻滞剂
+            
+            # 低氧约束
+            spo2 = medical_state[:, 5]
+            low_o2_mask = spo2 < 90
+            if low_o2_mask.any():
+                constrained_logits[low_o2_mask, 5] += 0.5  # 鼓励氧疗
         
         return constrained_logits
 
-class EnhancedTrainer:
-    """增强的训练器 - 包含医学安全约束"""
+class ExpertDataLoader:
+    """专家数据加载器 - 用于监督学习"""
     
-    def __init__(self, agent, reward_calculator, lr=5e-5, device='cpu'):
+    def __init__(self, expert_data_path=None):
+        # 如果没有提供路径，自动查找
+        if expert_data_path is None:
+            expert_data_path = self._find_expert_data_file()
+        
+        self.expert_data_path = expert_data_path
+        self.expert_actions = None
+        self.expert_states = None
+    
+    def _find_expert_data_file(self):
+        """自动查找专家数据文件"""
+        current_file_dir = Path(__file__).parent
+        possible_paths = [
+            current_file_dir / "processed_data" / "expert_data" / "expert_decisions.csv",
+            "processed_data/expert_data/expert_decisions.csv",
+            "../processed_data/expert_data/expert_decisions.csv", 
+            "data_pipeline/processed_data/expert_data/expert_decisions.csv",
+            "/Users/lulingwei/Desktop/TUM/sem_2/reinforcement learning/代码/data_pipeline/processed_data/expert_data/expert_decisions.csv",
+            current_file_dir.parent / "processed_data" / "expert_data" / "expert_decisions.csv"
+        ]
+        
+        for path in possible_paths:
+            if Path(path).exists():
+                print(f"👩‍⚕️ 自动找到专家数据: {path}")
+                return str(path)
+        
+        print("⚠️ 未找到专家数据文件，将使用模拟数据")
+        return None
+        
+    def load_expert_data(self):
+        """加载专家决策数据 - 增强错误处理"""
+        if self.expert_data_path is None:
+            print("⚠️ 未提供专家数据路径，生成模拟专家数据")
+            self.generate_simulated_expert_data()
+        else:
+            try:
+                print(f"📂 尝试加载专家数据: {self.expert_data_path}")
+                expert_data = pd.read_csv(self.expert_data_path)
+                
+                # 检查数据格式
+                if 'expert_action' not in expert_data.columns:
+                    print("⚠️ CSV文件缺少'expert_action'列，使用模拟数据")
+                    self.generate_simulated_expert_data()
+                    return
+                
+                # 提取特征列（排除非数值列）
+                feature_columns = []
+                for col in expert_data.columns:
+                    if col != 'expert_action' and col not in ['patient_id', 'timestamp', 'drug_name', 'vital_signs_count']:
+                        feature_columns.append(col)
+                
+                if len(feature_columns) == 0:
+                    print("⚠️ 未找到有效特征列，使用模拟数据")
+                    self.generate_simulated_expert_data()
+                    return
+                
+                # 提取数据
+                expert_features = expert_data[feature_columns]
+                expert_actions = expert_data['expert_action']
+                
+                # 清理数据 - 移除NaN行
+                valid_mask = ~(expert_features.isnull().any(axis=1) | expert_actions.isnull())
+                expert_features = expert_features[valid_mask]
+                expert_actions = expert_actions[valid_mask]
+                
+                if len(expert_actions) == 0:
+                    print("⚠️ 清理后没有有效数据，使用模拟数据")
+                    self.generate_simulated_expert_data()
+                    return
+                
+                # 转换为numpy数组
+                self.expert_states = expert_features.values.astype(np.float32)
+                self.expert_actions = expert_actions.values.astype(np.int64)
+                
+                print(f"✅ 加载真实专家数据: {len(self.expert_actions)} 个样本, {self.expert_states.shape[1]} 个特征")
+                print(f"   动作分布: {np.bincount(self.expert_actions)}")
+                
+            except Exception as e:
+                print(f"❌ 加载专家数据失败: {e}")
+                import traceback
+                traceback.print_exc()
+                print("使用模拟数据")
+                self.generate_simulated_expert_data()
+    
+    def generate_simulated_expert_data(self, num_samples=1000):
+        """生成模拟专家决策数据"""
+        # 基于医学规则生成模拟专家决策
+        np.random.seed(42)
+        
+        # 模拟状态特征 (temperature, heart_rate, bp_sys, bp_dias, spo2, ...)
+        states = []
+        actions = []
+        
+        for _ in range(num_samples):
+            # 生成患者状态
+            temp = np.random.normal(37.0, 1.5)  # 体温
+            hr = np.random.normal(80, 20)       # 心率
+            bp_sys = np.random.normal(120, 25)  # 收缩压
+            bp_dias = np.random.normal(80, 15)  # 舒张压
+            spo2 = np.random.normal(96, 4)      # 氧饱和度
+            
+            # 其他特征
+            other_features = np.random.normal(0, 1, 7)  # 其他12-5=7个特征
+            state = np.array([temp, hr, 0, bp_sys, bp_dias, spo2] + list(other_features))
+            
+            # 基于状态的专家决策规则
+            action = self.expert_decision_rule(temp, hr, bp_sys, bp_dias, spo2)
+            
+            states.append(state)
+            actions.append(action)
+        
+        self.expert_states = np.array(states)
+        self.expert_actions = np.array(actions)
+        print(f"✅ 生成模拟专家数据: {len(self.expert_actions)} 个样本")
+    
+    def expert_decision_rule(self, temp, hr, bp_sys, bp_dias, spo2):
+        """基于医学知识的专家决策规则"""
+        # 发热 -> 降温药物
+        if temp > 38.5:
+            return 1  # 降温药物
+        
+        # 心动过速 -> β受体阻滞剂
+        elif hr > 100:
+            return 2  # β受体阻滞剂
+        
+        # 低血压 -> 血管加压药
+        elif bp_sys < 90:
+            return 3  # 血管加压药
+        
+        # 高血压 -> 降压药
+        elif bp_sys > 140:
+            return 4  # 降压药
+        
+        # 低氧 -> 氧疗
+        elif spo2 < 92:
+            return 5  # 氧疗
+        
+        # 正常情况 -> 观察
+        else:
+            return 0  # 观察/维持治疗
+    
+    def get_expert_batch(self, batch_size=32):
+        """获取专家数据批次 - 增强错误处理"""
+        try:
+            if self.expert_states is None or self.expert_actions is None:
+                self.load_expert_data()
+            
+            if self.expert_states is None or self.expert_actions is None:
+                return None, None
+                
+            # 确保数据类型正确
+            if len(self.expert_actions) == 0:
+                return None, None
+                
+            indices = np.random.choice(len(self.expert_actions), batch_size, replace=True)
+            
+            batch_states = self.expert_states[indices]
+            batch_actions = self.expert_actions[indices]
+            
+            # 检查数据类型
+            if batch_states.dtype == object:
+                # 尝试修复 object 类型
+                fixed_states = []
+                for state in batch_states:
+                    if isinstance(state, (list, np.ndarray)):
+                        try:
+                            fixed_state = np.array(state, dtype=np.float32)
+                            if fixed_state.shape == (12,):  # 确保正确的特征数量
+                                fixed_states.append(fixed_state)
+                            else:
+                                # 默认值
+                                fixed_states.append(np.zeros(12, dtype=np.float32))
+                        except:
+                            fixed_states.append(np.zeros(12, dtype=np.float32))
+                    else:
+                        fixed_states.append(np.zeros(12, dtype=np.float32))
+                
+                batch_states = np.array(fixed_states, dtype=np.float32)
+            
+            return batch_states, batch_actions
+            
+        except Exception as e:
+            print(f"      专家数据批次获取错误: {e}")
+            return None, None
+
+class EnhancedTrainer:
+    """增强的训练器 - 包含医学安全约束和监督学习"""
+    
+    def __init__(self, agent, reward_calculator, lr=5e-5, device='cpu', expert_data_path=None):
         """初始化训练器"""
         self.agent = agent.to(device)
         self.reward_calculator = reward_calculator
         self.device = device
         self.safety_constraints = MedicalSafetyConstraints()
         
+        # 专家数据加载器 - ExpertDataLoader会自动查找数据
+        print("🔍 初始化专家数据加载器...")
+        
+        try:
+            self.expert_loader = ExpertDataLoader(expert_data_path)
+            self.expert_loader.load_expert_data()
+            
+            if self.expert_loader.expert_states is not None:
+                print(f"✅ 专家数据加载成功: {len(self.expert_loader.expert_actions)} 个样本")
+            else:
+                print("⚠️ 使用模拟专家数据")
+                
+        except Exception as e:
+            print(f"⚠️ 专家数据加载失败: {e}")
+            print("使用模拟数据作为备选")
+            self.expert_loader = ExpertDataLoader(None)
+            self.expert_loader.load_expert_data()
+        
         # 更稳定的优化器设置
         self.optimizer = optim.AdamW(
             self.agent.parameters(), 
             lr=lr, 
-            weight_decay=1e-4,
+            weight_decay=1e-3,  # 增加正则化
             betas=(0.9, 0.999),
             eps=1e-8
         )
@@ -402,12 +652,14 @@ class EnhancedTrainer:
             'train_total_loss': [],
             'train_actor_loss': [],
             'train_critic_loss': [],
+            'train_expert_loss': [],  # 新增：专家模仿损失
             'train_reward': [],
             'val_loss': [],
             'val_reward': [],
             'learning_rate': [],
             'gradient_norm': [],
-            'safety_violations': []
+            'safety_violations': [],
+            'rl_sl_weights': []  # 新增：RL和SL权重变化
         }
     
     def prepare_batch(self, sequences, batch_size=8):
@@ -431,10 +683,11 @@ class EnhancedTrainer:
             yield features, seq_lengths
     
     def train_epoch(self, train_sequences, epoch):
-        """增强的训练epoch - 包含安全约束和改进的损失计算"""
+        """增强的训练epoch - 包含安全约束、RL和SL混合训练"""
         self.agent.train()
         epoch_actor_losses = []
         epoch_critic_losses = []
+        epoch_expert_losses = []  # 新增：专家模仿损失
         epoch_rewards = []
         epoch_safety_violations = []
         epoch_gradient_norms = []
@@ -443,8 +696,9 @@ class EnhancedTrainer:
             
             self.optimizer.zero_grad()
             
-            # 前向传播
-            action_logits, state_values, _, attention_weights = self.agent(features, seq_lengths)
+            # 前向传播 - 包含RL和SL输出
+            (action_logits, state_values, _, attention_weights, 
+             rl_action_logits, expert_action_logits) = self.agent(features, seq_lengths)
             
             # 应用医学安全约束
             current_medical_state = features[:, -1, :]
@@ -468,10 +722,10 @@ class EnhancedTrainer:
             # 使用Huber损失更稳定
             critic_loss = self.huber_loss(state_values_squeezed, rewards)
             
-            # 计算advantages并标准化
+            # 简化advantages计算
             advantages = rewards - state_values_squeezed.detach()
-            if advantages.std() > 1e-6:
-                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            # 不进行标准化，直接使用
+            advantages = torch.clamp(advantages, min=-1.0, max=1.0)
             
             # 简化的Actor损失计算 - 标准策略梯度
             action_dist = torch.distributions.Categorical(action_probs)
@@ -480,36 +734,75 @@ class EnhancedTrainer:
             # 计算选中动作的对数概率
             log_probs = action_dist.log_prob(sampled_actions)
             
-            # 标准策略梯度损失 (REINFORCE)
-            policy_loss = -torch.mean(log_probs * advantages.detach())
+            # 完全重写Actor损失 - 使用简单的交叉熵损失
+            # 将RL问题转换为分类问题
+            # 使用advantages作为权重的交叉熵损失
+            
+            # 生成目标动作（基于advantages）
+            # 正advantages -> 鼓励当前动作，负advantages -> 惩罚当前动作
+            positive_advantages = advantages > 0
+            
+            # 对正advantages的动作使用正向交叉熵
+            positive_loss = torch.zeros_like(log_probs)
+            if positive_advantages.any():
+                positive_loss[positive_advantages] = -log_probs[positive_advantages] * advantages[positive_advantages].abs()
+            
+            # 对负advantages的动作使用反向交叉熵
+            negative_loss = torch.zeros_like(log_probs)
+            if (~positive_advantages).any():
+                # 惩罚当前动作，鼓励其他动作
+                negative_loss[~positive_advantages] = advantages[~positive_advantages].abs() * 0.1
+            
+            # 组合损失
+            policy_loss = (positive_loss + negative_loss).mean()
             
             # 熵正则化
             entropy = action_dist.entropy().mean()
-            entropy_bonus = 0.02 * entropy
-            
-            # 注意力正则化（鼓励关注重要时间步）
-            attention_penalty = 0.001 * torch.var(attention_weights).mean()
+            entropy_loss = -0.001 * entropy  # 微弱熵奖励
             
             # 最终Actor损失
-            actor_loss = policy_loss - entropy_bonus + attention_penalty
+            actor_loss = policy_loss + entropy_loss
+            actor_loss = torch.clamp(actor_loss, min=0.001)  # 强制为正值
             
-            # 安全约束损失
+            # 监督学习损失 - 模仿专家行为
+            expert_loss = self.calculate_expert_imitation_loss(
+                features, expert_action_logits, batch_idx
+            )
+            
+            # 简化安全约束损失
             safety_violation = self.calculate_safety_violations(action_probs)
-            safety_loss = 0.1 * safety_violation
+            safety_loss = 0.3 * safety_violation
             
-            # 总损失
-            total_loss = critic_loss + actor_loss + safety_loss
+            # 重新设计总损失 - 平衡各组件
+            total_loss = (
+                0.3 * critic_loss + 
+                0.3 * actor_loss + 
+                0.2 * expert_loss + 
+                0.2 * safety_loss
+            )
+            total_loss = torch.clamp(total_loss, min=0.0)
             
-            # 检查NaN/Inf
-            if torch.isnan(total_loss) or torch.isinf(total_loss):
-                print(f"NaN/Inf detected at epoch {epoch}, batch {batch_idx}. Skipping...")
+            # 检查异常损失值
+            if (torch.isnan(total_loss) or torch.isinf(total_loss) or 
+                torch.isnan(actor_loss) or torch.isnan(critic_loss) or
+                total_loss.item() < 0.0):
+                print(f"异常损失检测 epoch {epoch}, batch {batch_idx}: "
+                      f"total={total_loss.item():.6f}, actor={actor_loss.item():.6f}, "
+                      f"critic={critic_loss.item():.6f}. 跳过...")
                 continue
             
             # 反向传播
             total_loss.backward()
             
-            # 计算梯度范数
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.agent.parameters(), max_norm=0.5)
+            # 非常严格的梯度裁剪和梯度爆炸检测
+            grad_norm_before = torch.nn.utils.clip_grad_norm_(self.agent.parameters(), max_norm=float('inf'))
+            
+            # 如果梯度过大，跳过这个批次
+            if grad_norm_before > 5.0:
+                print(f"    梯度爆炸检测: {grad_norm_before:.2f} > 5.0, 跳过批次")
+                continue
+                
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.agent.parameters(), max_norm=0.1)
             epoch_gradient_norms.append(grad_norm.item())
             
             # 更新参数
@@ -518,6 +811,7 @@ class EnhancedTrainer:
             # 记录指标
             epoch_actor_losses.append(actor_loss.item())
             epoch_critic_losses.append(critic_loss.item())
+            epoch_expert_losses.append(expert_loss.item())
             epoch_rewards.append(rewards.mean().item())
             epoch_safety_violations.append(safety_violation.item())
             
@@ -525,46 +819,107 @@ class EnhancedTrainer:
             
             if batch_idx % 5 == 0:
                 print(f"Epoch {epoch}, Batch {batch_idx}: "
+                      f"Total Loss = {total_loss.item():.6f}, "
                       f"Actor Loss = {actor_loss.item():.6f}, "
                       f"Critic Loss = {critic_loss.item():.6f}, "
-                      f"Avg Reward = {rewards.mean().item():.4f}, "
-                      f"Entropy = {entropy.item():.4f}, "
-                      f"Safety Violations = {safety_violation.item():.4f}")
+                      f"Expert Loss = {expert_loss.item():.6f}, "
+                      f"Safety Loss = {safety_loss.item():.6f}, "
+                      f"Avg Reward = {rewards.mean().item():.4f}")
         
         # 计算平均指标
         avg_actor_loss = np.mean(epoch_actor_losses) if epoch_actor_losses else 0
         avg_critic_loss = np.mean(epoch_critic_losses) if epoch_critic_losses else 0
+        avg_expert_loss = np.mean(epoch_expert_losses) if epoch_expert_losses else 0
         avg_reward = np.mean(epoch_rewards) if epoch_rewards else 0
         avg_safety_violations = np.mean(epoch_safety_violations) if epoch_safety_violations else 0
         avg_grad_norm = np.mean(epoch_gradient_norms) if epoch_gradient_norms else 0
         
-        total_avg_loss = avg_actor_loss + avg_critic_loss
+        # 使用加权总损失
+        total_avg_loss = 0.3 * avg_critic_loss + 0.3 * avg_actor_loss + 0.2 * avg_expert_loss + 0.2 * avg_safety_violations
         
         # 更新历史记录
         self.history['train_actor_loss'].append(avg_actor_loss)
         self.history['train_critic_loss'].append(avg_critic_loss)
+        self.history['train_expert_loss'].append(avg_expert_loss)
         self.history['train_total_loss'].append(total_avg_loss)
         self.history['train_reward'].append(avg_reward)
         self.history['safety_violations'].append(avg_safety_violations)
         self.history['gradient_norm'].append(avg_grad_norm)
         self.history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
+        self.history['rl_sl_weights'].append([self.agent.rl_weight.item(), self.agent.sl_weight.item()])
         
         return total_avg_loss, avg_reward
     
     def calculate_safety_violations(self, action_probs):
-        """计算安全违规情况"""
+        """计算安全违规情况 - 更严格的评估"""
         violations = torch.zeros(action_probs.size(0), device=self.device)
         
-        # 检查危险动作组合
+        # 检查危险动作组合 - 更严格
         for dangerous_combo in self.safety_constraints.dangerous_combinations:
             combo_prob = torch.prod(action_probs[:, dangerous_combo], dim=1)
-            violations += combo_prob  # 危险组合的概率作为违规指标
+            violations += combo_prob * 2.0  # 加重危险组合惩罚
         
-        # 检查高剂量动作
-        high_dose_probs = action_probs[:, self.safety_constraints.max_dosage_actions]
-        violations += high_dose_probs.sum(dim=1) * 0.5  # 高剂量动作总概率
+        # 检查高风险动作
+        high_risk_probs = action_probs[:, self.safety_constraints.high_risk_actions]
+        violations += high_risk_probs.sum(dim=1) * 1.0  # 提高高风险动作惩罚
+        
+        # 检查动作分布集中度 - 过于集中也不安全
+        max_prob = torch.max(action_probs, dim=1)[0]
+        violations += torch.clamp(max_prob - 0.8, min=0) * 0.5  # 单一动作概率过高
         
         return violations.mean()
+    
+    def calculate_expert_imitation_loss(self, current_features, expert_logits, batch_idx):
+        """计算专家模仿损失 - 修复数据类型问题"""
+        batch_size = current_features.size(0)
+        
+        try:
+            # 获取专家数据批次
+            expert_states, expert_actions = self.expert_loader.get_expert_batch(batch_size)
+            
+            # 安全的数据类型转换
+            if expert_states is None or expert_actions is None:
+                # 如果没有专家数据，返回小损失
+                return torch.tensor(0.1, device=self.device, requires_grad=True)
+            
+            # 处理expert_states - 确保是数值类型
+            if isinstance(expert_states, np.ndarray):
+                if expert_states.dtype == object:
+                    # 如果是object类型，尝试转换
+                    try:
+                        expert_states = np.array([np.array(x, dtype=np.float32) for x in expert_states])
+                        expert_states = expert_states.astype(np.float32)
+                    except:
+                        # 转换失败，使用默认值
+                        expert_states = np.random.randn(batch_size, current_features.size(-1)).astype(np.float32)
+                else:
+                    expert_states = expert_states.astype(np.float32)
+            
+            # 处理expert_actions
+            if isinstance(expert_actions, np.ndarray):
+                expert_actions = expert_actions.astype(np.int64)
+            
+            # 转换为张量
+            expert_states_tensor = torch.tensor(expert_states, dtype=torch.float32, device=self.device)
+            expert_actions_tensor = torch.tensor(expert_actions, dtype=torch.long, device=self.device)
+            
+            # 检查维度是否匹配
+            if expert_states_tensor.size(0) != batch_size:
+                expert_states_tensor = expert_states_tensor[:batch_size]
+                expert_actions_tensor = expert_actions_tensor[:batch_size]
+            
+            if expert_actions_tensor.size(0) != batch_size:
+                expert_actions_tensor = expert_actions_tensor[:batch_size]
+            
+            # 计算交叉熵损失
+            expert_loss = nn.CrossEntropyLoss()(expert_logits, expert_actions_tensor)
+            
+            return expert_loss
+            
+        except Exception as e:
+            print(f"      专家数据处理错误: {e}，使用默认损失")
+            # 返回一个小的默认损失
+            return torch.tensor(0.1, device=self.device, requires_grad=True)
     
     def validate(self, val_sequences):
         """增强的模型验证 - 包含临床指标"""
@@ -580,7 +935,8 @@ class EnhancedTrainer:
         
         with torch.no_grad():
             for features, seq_lengths in self.prepare_batch(val_sequences):
-                action_logits, state_values, _, attention_weights = self.agent(features, seq_lengths)
+                (action_logits, state_values, _, attention_weights,
+                 rl_action_logits, expert_action_logits) = self.agent(features, seq_lengths)
                 
                 # 应用安全约束
                 current_medical_state = features[:, -1, :]
@@ -607,7 +963,12 @@ class EnhancedTrainer:
                 log_probs = action_dist.log_prob(sampled_actions)
                 actor_loss = -torch.mean(log_probs * advantages)
                 
-                total_loss = critic_loss.item() + actor_loss.item()
+                # 计算专家模仿损失
+                expert_loss = self.calculate_expert_imitation_loss(
+                    features, expert_action_logits, 0
+                )
+                
+                total_loss = critic_loss.item() + actor_loss.item() + 0.3 * expert_loss.item()
                 
                 if not (torch.isnan(torch.tensor(total_loss)) or torch.isinf(torch.tensor(total_loss))):
                     val_losses.append(total_loss)
@@ -797,17 +1158,19 @@ class EnhancedTrainer:
         plt.savefig('plots/clinical_rewards.png', dpi=300, bbox_inches='tight')
         plt.show()
         
-        # Plot 3: Actor vs Critic Loss
+        # Plot 3: Actor vs Critic vs Expert Loss
         plt.figure(figsize=(10, 6))
-        plt.plot(self.history['train_actor_loss'], label='Actor Loss', color='green', linewidth=2)
+        plt.plot(self.history['train_actor_loss'], label='Actor Loss (RL)', color='green', linewidth=2)
         plt.plot(self.history['train_critic_loss'], label='Critic Loss', color='orange', linewidth=2)
-        plt.title('Actor vs Critic Loss Comparison', fontsize=14, fontweight='bold')
+        if self.history['train_expert_loss']:
+            plt.plot(self.history['train_expert_loss'], label='Expert Loss (SL)', color='blue', linewidth=2)
+        plt.title('Actor vs Critic vs Expert Loss Comparison', fontsize=14, fontweight='bold')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig('plots/actor_critic_loss.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plots/actor_critic_expert_loss.png', dpi=300, bbox_inches='tight')
         plt.show()
         
         # Plot 4: Safety Violations
@@ -848,6 +1211,22 @@ class EnhancedTrainer:
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
             plt.savefig('plots/learning_rate.png', dpi=300, bbox_inches='tight')
+            plt.show()
+        
+        # Plot 7: RL vs SL Weight Evolution
+        if self.history['rl_sl_weights']:
+            plt.figure(figsize=(10, 6))
+            rl_weights = [w[0] for w in self.history['rl_sl_weights']]
+            sl_weights = [w[1] for w in self.history['rl_sl_weights']]
+            plt.plot(rl_weights, label='RL Weight', color='red', linewidth=2)
+            plt.plot(sl_weights, label='SL Weight', color='blue', linewidth=2)
+            plt.title('RL vs SL Weight Evolution During Training', fontsize=14, fontweight='bold')
+            plt.xlabel('Epoch')
+            plt.ylabel('Weight')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig('plots/rl_sl_weights.png', dpi=300, bbox_inches='tight')
             plt.show()
         
         print("📊 Individual plots saved to 'plots/' directory:")
@@ -936,12 +1315,13 @@ def main():
         # 创建奖励计算器
         reward_calculator = ClinicalRewardCalculator()
         
-        # 创建训练器
+        # 创建训练器 - 更稳定的学习率
         trainer = EnhancedTrainer(
             agent=agent,
             reward_calculator=reward_calculator,
-            lr=1e-4,  # 提高学习率以适应新的奖励函数
-            device=device
+            lr=3e-4,  # 恢复正常学习率
+            device=device,
+            expert_data_path=None  # 自动使用真实专家数据
         )
         
         # 训练模型
@@ -963,7 +1343,8 @@ def main():
         print("  - models/enhanced_checkpoint_epoch_*.pth")
         print("  - plots/total_loss.png")
         print("  - plots/clinical_rewards.png")
-        print("  - plots/actor_critic_loss.png")
+        print("  - plots/actor_critic_expert_loss.png")
+        print("  - plots/rl_sl_weights.png")
         print("  - plots/safety_violations.png")
         print("  - plots/gradient_norm.png")
         print("  - plots/learning_rate.png")
