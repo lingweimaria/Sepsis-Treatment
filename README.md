@@ -1,4 +1,5 @@
-# Sepsis-Treatment
+# Sepsis DRL Data Pipeline
+
 ## 目录结构
 
 ```
@@ -50,7 +51,6 @@ data_pipeline/
 ### 核心处理脚本
 1. **sepsis_data_preprocessing.py** - 败血症数据预处理主脚本
 2. **enhanced_sofa_calculator.py** - 增强SOFA评分计算器
-3. **run_sepsis_pipeline.py** - 数据处理流水线执行脚本
 
 
 ## SOFA评分计算
