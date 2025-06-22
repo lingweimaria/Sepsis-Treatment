@@ -1,0 +1,119 @@
+# 数据处理流水线配置文件
+
+# 数据路径配置
+data_paths:
+  raw_data_dir: "raw_data/mimic3_original"
+  processed_data_dir: "processed_data"
+  final_data_dir: "processed_data/final"
+  sofa_data_dir: "processed_data/complete_sofa_data"
+
+# 原始数据文件
+raw_data_files:
+  vital_signs: "time series variables(vital signs)_mimic3.csv"
+  demographics: "static variables(demographics)_mimic3.csv"
+  weight_height: "static variables(weight_height)_mimic3.csv"
+  medications: "top 1000 medications_mimic3.csv"
+  output: "time series variables(output)_mimic3.csv"
+  filtered_static: "filtered_static_ts.csv"
+
+# 处理参数
+processing_params:
+  # 序列长度
+  sequence_length: 7
+  
+  # 数据分割比例
+  train_ratio: 0.7
+  val_ratio: 0.2
+  test_ratio: 0.1
+  
+  # 特征工程
+  feature_engineering:
+    # 是否进行特征标准化
+    normalize_features: true
+    # 缺失值处理方法 [forward_fill, backward_fill, interpolate, mean, median]
+    missing_value_method: "forward_fill"
+    # 异常值处理
+    outlier_detection: true
+    outlier_method: "iqr"  # [iqr, zscore]
+    outlier_threshold: 3.0
+
+# SOFA评分配置
+sofa_config:
+  # 器官系统权重
+  organ_weights:
+    respiratory: 1.0
+    cardiovascular: 1.0
+    central_nervous: 1.0
+    renal: 1.0
+    coagulation: 0.5  # 数据不完整，降低权重
+    liver: 0.5        # 数据不完整，降低权重
+  
+  # 评分阈值
+  score_thresholds:
+    respiratory:
+      excellent: [400, 1000]    # SpO2/FiO2 ratio
+      good: [300, 400]
+      moderate: [200, 300]
+      poor: [100, 200]
+      critical: [0, 100]
+    
+    cardiovascular:
+      excellent: [70, 200]      # MAP mmHg
+      good: [65, 70]
+      moderate: [60, 65]
+      poor: [50, 60]
+      critical: [0, 50]
+    
+    central_nervous:
+      excellent: [15, 15]       # GCS score
+      good: [13, 14]
+      moderate: [10, 12]
+      poor: [6, 9]
+      critical: [3, 5]
+    
+    renal:
+      excellent: [0, 1.2]       # Creatinine mg/dL
+      good: [1.2, 2.0]
+      moderate: [2.0, 3.5]
+      poor: [3.5, 5.0]
+      critical: [5.0, 100]
+
+# 数据质量检查
+quality_checks:
+  # 最小序列长度
+  min_sequence_length: 3
+  # 最大缺失值比例
+  max_missing_ratio: 0.8
+  # 数值范围检查
+  value_ranges:
+    temperature: [32, 42]      # 摄氏度
+    heart_rate: [20, 250]      # bpm
+    respiratory_rate: [5, 60]   # breaths/min
+    systolic_bp: [50, 250]     # mmHg
+    diastolic_bp: [20, 150]    # mmHg
+    oxygen_saturation: [50, 100] # %
+    glucose: [20, 800]         # mg/dL
+
+# 输出配置
+output_config:
+  # 保存格式
+  save_formats: ["npy", "csv"]
+  # 是否保存元数据
+  save_metadata: true
+  # 是否生成报告
+  generate_reports: true
+  # 日志级别 [DEBUG, INFO, WARNING, ERROR]
+  log_level: "INFO"
+
+# 强化学习配置
+rl_config:
+  # 动作空间大小
+  action_space_size: 20
+  # 状态空间维度 (会根据实际特征数量调整)
+  state_space_dim: 15
+  # 奖励函数权重
+  reward_weights:
+    sofa_improvement: 0.5
+    vital_signs: 0.4
+    stability: 0.15
+    safety: 0.05
