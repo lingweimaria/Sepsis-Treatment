@@ -1,0 +1,79 @@
+{
+  "total_decisions": 5115,
+  "unique_patients": 95,
+  "action_distribution": {
+    "0": 1967,
+    "11": 1321,
+    "10": 404,
+    "17": 236,
+    "4": 206,
+    "18": 179,
+    "13": 165,
+    "3": 157,
+    "9": 153,
+    "19": 148,
+    "2": 84,
+    "7": 51,
+    "1": 44
+  },
+  "drug_distribution": {
+    "0.9% Sodium Chloride": 474,
+    "Potassium Chloride": 341,
+    "5% Dextrose": 218,
+    "Metoprolol Tartrate": 186,
+    "Furosemide": 154,
+    "SW": 143,
+    "Insulin": 143,
+    "Magnesium Sulfate": 118,
+    "Sodium Chloride 0.9%  Flush": 107,
+    "Iso-Osmotic Dextrose": 106,
+    "Vancomycin": 88,
+    "Calcium Gluconate": 79,
+    "Lorazepam": 74,
+    "HYDROmorphone (Dilaudid)": 73,
+    "Acetaminophen": 71,
+    "LR": 71,
+    "Fentanyl Citrate": 62,
+    "Propofol": 61,
+    "HydrALAzine": 52,
+    "Sterile Water": 51
+  },
+  "feature_statistics": {
+    "temperature": {
+      "mean": 37.0,
+      "std": 0.0,
+      "min": 37.0,
+      "max": 37.0
+    },
+    "heart_rate": {
+      "mean": 88.81212121212121,
+      "std": 19.197665011704327,
+      "min": 41.0,
+      "max": 142.0
+    },
+    "respiratory_rate": {
+      "mean": 20.102248289345063,
+      "std": 5.168485551011934,
+      "min": 0.0,
+      "max": 46.0
+    },
+    "bp_systolic": {
+      "mean": 120.43206256109482,
+      "std": 14.722429485151379,
+      "min": 58.0,
+      "max": 199.0
+    },
+    "bp_diastolic": {
+      "mean": 71.0357771260997,
+      "std": 13.047628319677694,
+      "min": 32.0,
+      "max": 136.0
+    },
+    "spo2": {
+      "mean": 97.24692082111437,
+      "std": 2.6713158981803433,
+      "min": 73.0,
+      "max": 100.0
+    }
+  }
+}
