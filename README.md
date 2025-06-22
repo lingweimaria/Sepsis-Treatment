@@ -80,7 +80,7 @@ SOFA (Sequential Organ Failure Assessment) 评分包含6个器官系统：
 python run_complete_pipeline.py
 ```
 
-### 2. 运行模型训练 (包含可视化)
+### 2. 只运行模型训练 (包含可视化)
 ```bash
 python fixed_sepsis_training.py
 ```
