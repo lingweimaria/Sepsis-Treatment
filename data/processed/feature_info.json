@@ -1,0 +1,84 @@
+{
+  "state_features": [
+    "map",
+    "heart_rate",
+    "respiratory_rate",
+    "temperature_fahrenheit",
+    "arterial_blood_pressure_systolic",
+    "arterial_blood_pressure_diastolic",
+    "o2_saturation_pulseoxymetry",
+    "glucose_(serum)",
+    "creatinine",
+    "bilirubin,_total",
+    "platelet_count",
+    "gcs_-_eye_opening",
+    "gcs_-_motor_response",
+    "gcs_-_verbal_response",
+    "age",
+    "gender"
+  ],
+  "state_dim": 16,
+  "action_dim": 20,
+  "action_mapping": {
+    "0.9% Sodium Chloride": 0,
+    "Potassium Chloride": 1,
+    "5% Dextrose": 2,
+    "Furosemide": 3,
+    "Insulin": 4,
+    "Magnesium Sulfate": 5,
+    "Sodium Chloride 0.9%  Flush": 6,
+    "Iso-Osmotic Dextrose": 7,
+    "Vancomycin": 8,
+    "Calcium Gluconate": 9,
+    "Lorazepam": 10,
+    "HYDROmorphone (Dilaudid)": 11,
+    "LR": 12,
+    "Fentanyl Citrate": 13,
+    "Propofol": 14,
+    "Heparin": 15,
+    "Potassium Phosphate": 16,
+    "Morphine Sulfate": 17,
+    "Midazolam": 18,
+    "NS": 19
+  },
+  "treatment_categories": {
+    "fluid_therapy": [
+      0,
+      2,
+      6,
+      7,
+      12,
+      19
+    ],
+    "electrolytes": [
+      1,
+      5,
+      9,
+      16
+    ],
+    "sedation": [
+      10,
+      14,
+      18
+    ],
+    "analgesia": [
+      11,
+      13,
+      17
+    ],
+    "antibiotics": [
+      8
+    ],
+    "diuretics": [
+      3
+    ],
+    "insulin": [
+      4
+    ],
+    "anticoagulation": [
+      15
+    ]
+  },
+  "num_sequences": 128,
+  "num_patients": 29
+}

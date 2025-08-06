@@ -1,0 +1,19 @@
+{
+  "total_decisions": 11014221,
+  "unique_patients": 22899,
+  "unique_medications": 28,
+  "treatment_categories": {
+    "antibiotics": 2807403,
+    "fluid_therapy": 2685984,
+    "analgesia": 1740695,
+    "vasopressor": 1136714,
+    "metabolic": 866841,
+    "anticoagulation": 813242,
+    "sedation": 679019,
+    "diuretics": 193403,
+    "coagulation": 64749,
+    "electrolytes": 26171
+  },
+  "average_confidence": 0.905629363166036,
+  "merged_records": 324453
+}

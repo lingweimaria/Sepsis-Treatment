@@ -1,167 +1,343 @@
-# Sepsis DRL Data Pipeline
+# Sepsis Treatment Reinforcement Learning System
 
-## 目录结构
+## Overview
+
+This project implements a reinforcement learning system for optimizing sepsis treatment decisions using MIMIC-III data. The system uses TD3 (Twin Delayed Deep Deterministic Policy Gradient) and DDPG algorithms to learn optimal drug prescription policies for sepsis patients.
+
+## System Architecture
 
 ```
-data_pipeline/
-├── raw_data/                    # 原始数据
-│   └── mimic3_original/        # MIMIC-III原始数据文件
-├── processed_data/             # 处理后数据
-│   ├── complete_sofa_data/     # 完整SOFA评分数据
-│   ├── intermediate/           # 中间处理数据
-│   └── final/                  # 最终训练数据
-├── preprocessing_scripts/      # 数据处理脚本
-├── utils/                      # 工具函数
-├── configs/                    # 配置文件
-└── README.md                   # 本文件
+Raw Data → Data Preprocessing → Feature Engineering → Drug Mapping → Model Training → Evaluation
+    ↓              ↓                    ↓              ↓               ↓            ↓
+MIMIC-III     Cleaned Data        Merged Dataset    Action Space    TD3/DDPG    Performance
+                                                                                   Analysis
 ```
 
-## 数据流程
+## Data Processing Pipeline
 
-### 1. 原始数据 (raw_data/mimic3_original/)
-- `time series variables(vital signs)_mimic3.csv` - 生命体征时间序列
-- `static variables(demographics)_mimic3.csv` - 人口统计学静态变量
-- `static variables(weight_height)_mimic3.csv` - 身高体重数据
-- `top 1000 medications_mimic3.csv` - 药物数据
-- `time series variables(output)_mimic3.csv` - 输出量数据
-- `filtered_static_ts.csv` - 过滤后的静态时间序列
+### 1. Raw Data Sources
 
-### 2. 中间处理数据 (processed_data/intermediate/)
-- `vital_signs_processed.csv` - 处理后生命体征
-- `demographics_processed.csv` - 处理后人口统计学数据
-- `weight_height_processed.csv` - 处理后身高体重
-- `medications_processed.csv` - 处理后药物数据
-- `gcs_processed.csv` - GCS评分数据
+The system uses the following MIMIC-III datasets:
 
-### 3. SOFA评分数据 (processed_data/complete_sofa_data/)
-- `enhanced_sofa_dataset.csv` - 增强SOFA数据集
-- `sofa_data_report.json` - SOFA数据报告
+#### Core Clinical Data
+- **`final_df.csv`**: Patient demographics, vital signs, lab values, and static features
+- **`sofa.csv`**: Sequential Organ Failure Assessment (SOFA) scores over time
 
-### 4. 最终训练数据 (processed_data/final/)
-- `train_features.npy` - 训练特征
-- `val_features.npy` - 验证特征  
-- `test_features.npy` - 测试特征
-- `train_metadata.csv` - 训练元数据
-- `val_metadata.csv` - 验证元数据
-- `test_metadata.csv` - 测试元数据
-- `feature_info.csv` - 特征信息
+#### Medical Records
+- **`ADMISSIONS.csv`**: Hospital admission records
+- **`PATIENTS.csv`**: Patient demographic information
+- **`CHARTEVENTS.csv`**: Vital signs and clinical measurements
+- **`LABEVENTS.csv`**: Laboratory test results
+- **`PRESCRIPTIONS.csv`**: Medication prescriptions
+- **`top 1000 medications_mimic3.csv`**: Top 1000 medications with standardized names
 
-## 处理脚本说明
+#### Dictionary Files
+- **`D_ITEMS.csv`**: Item definitions for chart events
+- **`D_LABITEMS.csv`**: Laboratory item definitions
+- **`D_ICD_DIAGNOSES.csv`**: ICD diagnosis code definitions
 
-### 核心处理脚本
-1. **sepsis_data_preprocessing.py** - 败血症数据预处理主脚本
-2. **enhanced_sofa_calculator.py** - 增强SOFA评分计算器
+### 2. Data Preprocessing
 
+#### Step 1: Prescription Data Cleaning (`clean_prescription_data.py`)
 
-## SOFA评分计算
+**Purpose**: Clean temporal anomalies in prescription data
 
-SOFA (Sequential Organ Failure Assessment) 评分包含6个器官系统：
+**Process**:
+1. **Temporal Filtering**:
+   - Remove records with years < 2100 (data entry errors)
+   - Remove records with years > 2200 (future dates)
+   - Remove records with negative duration (ENDDATE < STARTDATE)
 
-1. **呼吸系统** - SpO2/FiO2比值 (0-4分)
-2. **心血管系统** - 平均动脉压 + 血管加压药 (0-4分)
-3. **中枢神经系统** - GCS评分 (0-4分)
-4. **肾脏系统** - 肌酐 + 尿量 (0-4分)
-5. **凝血系统** - 血小板计数 (0-4分) [数据缺失]
-6. **肝脏系统** - 胆红素 (0-4分) [数据缺失]
+2. **Data Validation**:
+   - Ensure valid HADM_ID references
+   - Validate drug name consistency
+   - Generate cleaning statistics
 
-### 可用指标
-- ✅ GCS评分 (眼部、言语、运动反应)
-- ✅ 生命体征 (血压、心率、呼吸频率、体温、SpO2)
-- ✅ 实验室指标 (肌酐、血糖、乳酸、pH值)
-- ✅ 血管加压药使用情况
-- ✅ 尿量数据
-- ❌ 血小板计数 (需要LABEVENTS表)
-- ❌ 胆红素 (需要LABEVENTS表)
+**Output**: `data/processed/cleaned_prescriptions.csv`
 
-## 使用方法
+#### Step 2: Dataset Merging (`merge_datasets.py`)
 
-### 1. 运行完整数据处理流水线
+**Purpose**: Combine clinical data with SOFA scores
+
+**Process**:
+1. **Data Loading**:
+   - Load `sofa.csv` (temporal SOFA scores)
+   - Load `final_df.csv` (clinical features)
+
+2. **Feature Separation**:
+   - **Static Features**: `subject_id`, `gender`, `age`, `weight_kg`, `height_cm`, `hospital_expire_flag`, `admittime`
+   - **Temporal Features**: All remaining clinical measurements
+
+3. **Feature Engineering**:
+   - Binary encoding: `gender` (M=1, F=0)
+   - Remove irrelevant features: `religion`, `language`, `marital_status`, `ethnicity`
+   - Preserve `admittime` for temporal alignment
+
+4. **Data Merging**:
+   - Merge on `hadm_id` and `time_step`
+   - Handle missing values through forward filling
+   - Ensure temporal consistency
+
+**Output**: `data/processed/merged_dataset.csv`
+
+### 3. Drug Dictionary Mapping
+
+#### Drug Standardization Process
+
+**Purpose**: Map raw drug names to standardized action indices
+
+**Files**:
+- **`improved_drug_map.json`**: Maps drug names to indices
+- **`improved_drug_idx.json`**: Bidirectional mapping with metadata
+
+**Drug Categories** (Top 100 drugs):
+1. **Cardiovascular**: METOPROLOL, FUROSEMIDE, HYDRALAZINE, AMIODARONE
+2. **Analgesics**: MORPHINE, HYDROMORPHONE, OXYCODONE, FENTANYL
+3. **Antibiotics**: VANCOMYCIN, LEVOFLOXACIN, PIPERACILLIN, CEFTRIAXONE
+4. **Electrolytes**: SODIUM, POTASSIUM, MAGNESIUM, CALCIUM
+5. **Fluids**: D5W, NS (Normal Saline), LR (Lactated Ringer's)
+6. **Sedatives**: PROPOFOL, LORAZEPAM, MIDAZOLAM
+
+**Mapping Structure**:
+```json
+{
+  "drug_to_index": {
+    "SODIUM": 0,
+    "POTASSIUM": 1,
+    "INSULIN": 2,
+    ...
+  },
+  "num_drugs": 100,
+  "other_index": -1
+}
+```
+
+### 4. Final Dataset Creation (`create_training_dataset.py`)
+
+**Purpose**: Generate the complete training dataset with actions
+
+**Process**:
+
+1. **Data Integration**:
+   - Load merged clinical data
+   - Load cleaned prescription data
+   - Load drug mapping dictionaries
+
+2. **SOFA Component Removal**:
+   - Remove individual SOFA components: `sofa_resp`, `sofa_coag`, `sofa_liver`, `sofa_cardiovascular`, `sofa_cns`, `sofa_renal`
+   - Retain overall `sofa` score for reward calculation
+
+3. **Temporal Window Generation**:
+   - Create 24-hour time windows based on `admittime + time_step`
+   - Each `time_step` represents 24 hours from admission
+
+4. **Action Space Construction**:
+   - Map prescriptions to 24-hour time windows
+   - Create binary action vectors (100 dimensions)
+   - Handle overlapping prescriptions within windows
+
+5. **Data Quality Assurance**:
+   - Filter patients with sufficient temporal data
+   - Ensure action-state alignment
+   - Generate metadata for model training
+
+**Output**: 
+- `data/processed/training_dataset.csv`
+- `data/processed/training_dataset_metadata.json`
+
+## Model Architecture
+
+### 1. Environment Design
+
+#### State Space
+- **Dimensions**: ~50-100 clinical features
+- **Features**: 
+  - Vital signs (heart rate, blood pressure, temperature)
+  - Laboratory values (creatinine, bilirubin, platelet count)
+  - Demographics (age, gender, weight)
+  - SOFA score (disease severity indicator)
+
+#### Action Space
+- **Dimensions**: 100 drug categories
+- **Type**: Continuous (0-1) representing prescription probability
+- **Interpretation**: Values > 0.5 indicate drug administration
+
+#### Reward Function
+```python
+reward = sofa_reward + vital_signs_reward + sparsity_penalty + terminal_reward
+```
+
+**Components**:
+1. **SOFA Reward**: `clip(prev_sofa - current_sofa, -2, 2)`
+2. **Vital Signs Reward**: 
+   - +0.25 if 90 ≤ SBP ≤ 140
+   - +0.25 if 60 ≤ HR ≤ 110
+3. **Sparsity Penalty**: `-0.1 × mean(action)` (discourage over-prescription)
+4. **Terminal Reward**: +15.0 (survival) or -15.0 (death)
+
+### 2. Neural Network Architecture
+
+#### LSTM Actor Network
+```python
+class EnhancedLSTMActorNetwork:
+    - LSTM(state_dim, hidden_dim=128, num_layers=2, dropout=0.2)
+    - LayerNorm + ReLU + Linear(hidden_dim)
+    - LayerNorm + Sigmoid(action_dim)
+```
+
+#### LSTM Critic Network
+```python
+class EnhancedLSTMCriticNetwork:
+    - LSTM(state_dim, hidden_dim=128, num_layers=1)
+    - State Branch: Linear(hidden_dim, hidden_dim//2)
+    - Action Branch: Linear(action_dim, hidden_dim//2)
+    - Q-Value Output: Linear(hidden_dim, 1)
+```
+
+### 3. Training Algorithms
+
+#### TD3 (Twin Delayed Deep Deterministic Policy Gradient)
+
+**Key Features**:
+- **Twin Critics**: Reduces overestimation bias
+- **Delayed Policy Updates**: Updates actor every 2 critic updates
+- **Target Noise**: Adds noise to target actions
+
+**Hyperparameters**:
+- Learning Rate: 3e-4 (actor), 3e-4 (critic)
+- Discount Factor (γ): 0.99
+- Soft Update Rate (τ): 0.005
+- Target Noise: 0.2, Noise Clip: 0.5
+
+**Update Equations**:
+```python
+# Critic Update
+target_q = min(Q1_target, Q2_target)
+target_values = rewards + γ * (1 - dones) * target_q
+critic_loss = MSE(Q(s,a), target_values)
+
+# Actor Update (delayed)
+actor_loss = -Q1(s, π(s)).mean()
+```
+
+#### DDPG (Baseline Comparison)
+
+**Key Features**:
+- Single critic network
+- Continuous action spaces
+- Experience replay
+
+**Hyperparameters**:
+- Learning Rate: 1e-3 (actor), 1e-3 (critic)
+- Soft Update Rate (τ): 0.001
+- Exploration Noise: 0.1
+
+## Usage Instructions
+
+### 1. Environment Setup
+
 ```bash
-python run_complete_pipeline.py
+# Clone repository
+git clone <repository_url>
+cd sepsis_rl_system
+
+# Install dependencies
+pip install pandas numpy torch scikit-learn matplotlib seaborn
 ```
 
-### 2. 只运行模型训练 (包含可视化)
+### 2. Data Preparation
+
 ```bash
-python fixed_sepsis_training.py
+# Step 1: Clean prescription data
+python scripts/clean_prescription_data.py
+
+# Step 2: Merge datasets
+python scripts/merge_datasets.py
+
+# Step 3: Create training dataset
+python scripts/create_training_dataset.py
 ```
 
-### 3. 单独运行SOFA计算
+### 3. Model Training
+
 ```bash
-python preprocessing_scripts/enhanced_sofa_calculator.py
+# Train TD3 model with comparison to DDPG
+python scripts/training/td.py
+
+# Evaluate existing model similarity
+python scripts/training/td.py --evaluate-similarity [model_path]
+
+# Test mortality evaluation
+python scripts/training/td.py --test-mortality
+
+# Generate visualization
+python scripts/training/td.py --test-viz
 ```
 
-### 4. 运行败血症预处理
-```bash
-python preprocessing_scripts/sepsis_data_preprocessing.py
+### 4. Model Evaluation
+
+The system automatically generates comprehensive evaluation including:
+
+1. **Mortality Rate Comparison**:
+   - Physician baseline vs. AI agent performance
+   - Training progression analysis
+
+2. **Agent-Physician Similarity**:
+   - Cosine similarity of action patterns
+   - Drug usage frequency correlation
+   - Mean squared error of decisions
+
+3. **Case Study Analysis**:
+   - Individual patient trajectory visualization
+   - Treatment outcome tracking
+
+## Results and Visualization
+
+### Performance Metrics
+
+1. **Clinical Outcomes**:
+   - Mortality rate reduction
+   - SOFA score improvement
+   - Treatment response time
+
+2. **Policy Analysis**:
+   - Action similarity with physician decisions
+   - Drug prescription patterns
+   - Temporal attention mechanisms
+
+### Visualization Components
+
+The system generates a comprehensive 2×2 visualization grid:
+
+1. **Learning Curves**: TD3 vs DDPG training progress
+2. **Mortality Trends**: Performance improvement over training
+3. **Attention Heatmap**: Temporal dependencies in decision-making
+4. **Case Study**: Individual patient treatment trajectory
+
+## File Structure
+
+```
+sepsis_rl_system/
+├── data/
+│   ├── raw/                    # Original MIMIC-III data
+│   └── processed/              # Processed datasets
+├── scripts/
+│   ├── clean_prescription_data.py
+│   ├── merge_datasets.py
+│   ├── create_training_dataset.py
+│   ├── improved_drug_map.json
+│   ├── improved_drug_idx.json
+│   └── training/
+│       └── td.py              # Main training script
+├── models/                     # Saved model checkpoints
+└── README.md
 ```
 
-## 数据质量
+## Technical Details
 
-- **训练序列**: ~1000-5000个有效序列
-- **验证序列**: ~200-1000个有效序列
-- **特征维度**: 通常12-15个特征
-- **序列长度**: 固定为7个时间步
-- **数据完整性**: 约60-80% (取决于具体指标)
+### Computational Requirements
 
-## 强化学习集成
-
-处理后的数据直接用于强化学习训练：
-- **状态空间**: 多维生命体征 + SOFA评分
-- **动作空间**: 20种治疗动作
-- **奖励函数**: 基于SOFA改善、生命体征稳定性等临床指标
-
-### 模型训练功能 (fixed_sepsis_training.py)
-- **LSTM智能体**: 增强的败血症LSTM智能体，包含注意力机制
-- **临床奖励计算**: 基于医学指标的奖励函数
-- **医学安全约束**: 防止危险治疗组合
-- **训练可视化**: 自动生成训练曲线图表
-- **模型保存**: 自动保存最佳模型和检查点
-
-### 生成的文件
-训练完成后会在以下位置生成文件：
-- `models/enhanced_best_sepsis_agent.pth` - 最佳模型
-- `plots/` - 训练可视化图表
-  - `total_loss.png` - 总损失曲线
-  - `clinical_rewards.png` - 临床奖励曲线
-  - `actor_critic_loss.png` - Actor-Critic损失对比
-  - `safety_violations.png` - 安全违规情况
-  - `gradient_norm.png` - 梯度范数
-  - `learning_rate.png` - 学习率调度
-- `enhanced_training_report.txt` - 训练报告
-
-## 注意事项
-
-1. 确保MIMIC-III数据访问权限
-2. 处理过程中会自动处理缺失值
-3. SOFA评分计算可能不完整 (缺少血小板和胆红素)
-4. 建议在处理前备份原始数据
-
-## 更新
-🔄 优化内容
-
-  1. 基于真实临床指南的约束
-
-  ### 更精准的危险组合
-  血管加压药 + 降压药：相互抵消
-  利尿剂 + 大量电解质     # 电解质紊乱  
-  镇痛剂 + 镇静剂       # 过度镇静
-
-  2. 智能生理状态约束
-
-  低血压(<85mmHg) → 禁止降压药 + 鼓励加压药
-  高血压(>160mmHg) → 限制加压药
-  心动过速(>130bpm) → 鼓励β受体阻滞剂
-  低氧(<90%) → 鼓励氧疗
-
-  3. 权重重新平衡
-
-  #### 新权重分配
-  专家模仿(SL): 40%    
-  强化学习(RL): 原权重   
-  安全约束: 5% ：辅助保护 (降低从10%)
-
-  🎯 设计理念
-
-  1. 专家数据为主导 - 真实医生决策是最可靠的
-  2. 安全约束为保护 - 防止极端情况下的危险决策
-  3. 轻量化约束 - 避免过度限制模型学习能力
+- **GPU**: Recommended for faster training (CUDA support)
+- **Memory**: 8GB+ RAM for full dataset processing
+- **Storage**: 5GB+ for MIMIC-III data and processed files
+- **Training Time**: 2-4 hours on modern GPU

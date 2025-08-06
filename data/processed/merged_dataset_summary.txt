@@ -1,0 +1,49 @@
+数据合并摘要
+==================================================
+
+最终数据形状: (31021, 29)
+列数: 29
+行数: 31021
+唯一hadm_id数量: 8467
+time_step范围: 0 到 131
+
+特征清理说明:
+- 已删除与治疗无关的特征: religion, language, marital_status, ethnicity
+- 已对gender进行二进制编码 (M=1, F=0)
+- 保留的静态特征: subject_id, gender, age, weight_kg, height_cm, hospital_expire_flag, admittime
+- admittime字段保留用于后续药物数据时间对齐
+
+列名列表:
+  1. hadm_id
+  2. time_step
+  3. arterial_blood_pressure_diastolic
+  4. arterial_blood_pressure_systolic
+  5. bilirubin,_total
+  6. creatinine
+  7. foley
+  8. gcs_-_eye_opening
+  9. gcs_-_motor_response
+ 10. gcs_-_verbal_response
+ 11. glucose_(serum)
+ 12. heart_rate
+ 13. inspired_o2_fraction
+ 14. o2_saturation_pulseoxymetry
+ 15. platelet_count
+ 16. respiratory_rate
+ 17. temperature_fahrenheit
+ 18. ph
+ 19. po2
+ 20. map
+ 21. isvent_flag
+ 22. sofa
+ 23. subject_id
+ 24. gender
+ 25. age
+ 26. weight_kg
+ 27. height_cm
+ 28. hospital_expire_flag
+ 29. admittime
+
+缺失值统计:
+isvent_flag: 1055 (3.4%)
+height_cm: 4881 (15.7%)

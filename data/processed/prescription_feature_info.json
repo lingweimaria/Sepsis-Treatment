@@ -1,0 +1,38 @@
+{
+  "state_dim": 19,
+  "action_dim": 8,
+  "prescription_features": [
+    "vasopressor_count",
+    "vasopressor_unique_drugs",
+    "vasopressor_avg_dose",
+    "vasopressor_total_duration_hours",
+    "antibiotic_count",
+    "antibiotic_unique_drugs",
+    "antibiotic_avg_dose",
+    "antibiotic_total_duration_hours",
+    "fluid_count",
+    "fluid_unique_drugs",
+    "fluid_avg_dose",
+    "fluid_total_duration_hours",
+    "steroid_count",
+    "steroid_unique_drugs",
+    "steroid_avg_dose",
+    "steroid_total_duration_hours",
+    "has_norepinephrine",
+    "has_vasopressin",
+    "has_vancomycin",
+    "has_meropenem",
+    "treatment_intensity_score"
+  ],
+  "data_source": "mimic3_with_real_prescriptions",
+  "action_mapping": {
+    "0": "no_treatment",
+    "1": "antibiotics_only",
+    "2": "fluids_only",
+    "3": "antibiotics_and_fluids",
+    "4": "vasopressors_low_dose",
+    "5": "vasopressors_high_dose",
+    "6": "antibiotics_and_vasopressors",
+    "7": "full_treatment_combo"
+  }
+}

@@ -1,0 +1,171 @@
+{
+  "state_features": [
+    "map",
+    "heart_rate",
+    "respiratory_rate",
+    "temperature_fahrenheit",
+    "arterial_blood_pressure_systolic",
+    "arterial_blood_pressure_diastolic",
+    "o2_saturation_pulseoxymetry",
+    "glucose_(serum)",
+    "creatinine",
+    "bilirubin,_total",
+    "platelet_count",
+    "gcs_-_eye_opening",
+    "gcs_-_motor_response",
+    "gcs_-_verbal_response",
+    "age",
+    "gender"
+  ],
+  "state_dim": 16,
+  "action_dim": 20,
+  "treatment_actions": {
+    "0": {
+      "name": "0.9% Sodium Chloride",
+      "category": "fluid_therapy",
+      "indication": "volume_expansion"
+    },
+    "1": {
+      "name": "Potassium Chloride",
+      "category": "electrolytes",
+      "indication": "hypokalemia"
+    },
+    "2": {
+      "name": "5% Dextrose",
+      "category": "fluid_therapy",
+      "indication": "hypoglycemia"
+    },
+    "3": {
+      "name": "Furosemide",
+      "category": "diuretics",
+      "indication": "fluid_overload"
+    },
+    "4": {
+      "name": "Insulin",
+      "category": "metabolic",
+      "indication": "hyperglycemia"
+    },
+    "5": {
+      "name": "Magnesium Sulfate",
+      "category": "electrolytes",
+      "indication": "hypomagnesemia"
+    },
+    "6": {
+      "name": "Vasopressor",
+      "category": "vasopressor",
+      "indication": "hypotension"
+    },
+    "7": {
+      "name": "Norepinephrine",
+      "category": "vasopressor",
+      "indication": "severe_hypotension"
+    },
+    "8": {
+      "name": "Vancomycin",
+      "category": "antibiotics",
+      "indication": "infection"
+    },
+    "9": {
+      "name": "Calcium Gluconate",
+      "category": "electrolytes",
+      "indication": "hypocalcemia"
+    },
+    "10": {
+      "name": "Lorazepam",
+      "category": "sedation",
+      "indication": "agitation"
+    },
+    "11": {
+      "name": "Morphine",
+      "category": "analgesia",
+      "indication": "pain"
+    },
+    "12": {
+      "name": "Lactated Ringers",
+      "category": "fluid_therapy",
+      "indication": "balanced_fluid"
+    },
+    "13": {
+      "name": "Fentanyl",
+      "category": "analgesia",
+      "indication": "severe_pain"
+    },
+    "14": {
+      "name": "Propofol",
+      "category": "sedation",
+      "indication": "mechanical_ventilation"
+    },
+    "15": {
+      "name": "Heparin",
+      "category": "anticoagulation",
+      "indication": "thrombosis_prevention"
+    },
+    "16": {
+      "name": "Bicarbonate",
+      "category": "metabolic",
+      "indication": "acidosis"
+    },
+    "17": {
+      "name": "Albumin",
+      "category": "fluid_therapy",
+      "indication": "hypoalbuminemia"
+    },
+    "18": {
+      "name": "Fresh Frozen Plasma",
+      "category": "coagulation",
+      "indication": "coagulopathy"
+    },
+    "19": {
+      "name": "Supportive Care",
+      "category": "supportive",
+      "indication": "monitoring"
+    }
+  },
+  "treatment_categories": {
+    "fluid_therapy": [
+      0,
+      2,
+      12,
+      17
+    ],
+    "electrolytes": [
+      1,
+      5,
+      9
+    ],
+    "vasopressor": [
+      6,
+      7
+    ],
+    "antibiotics": [
+      8
+    ],
+    "sedation": [
+      10,
+      14
+    ],
+    "analgesia": [
+      11,
+      13
+    ],
+    "metabolic": [
+      4,
+      16
+    ],
+    "diuretics": [
+      3
+    ],
+    "anticoagulation": [
+      15
+    ],
+    "coagulation": [
+      18
+    ],
+    "supportive": [
+      19
+    ]
+  },
+  "num_sequences": 2380,
+  "num_patients": 429,
+  "data_source": "mimic3_with_simulated_expert_decisions"
+}

@@ -1,0 +1,96 @@
+{
+  "outlier_method": "iqr",
+  "missing_method": "knn",
+  "scaling_method": "standard",
+  "outlier_bounds": {
+    "arterial_blood_pressure_diastolic": [
+      32.51739130434783,
+      86.92434782608694
+    ],
+    "arterial_blood_pressure_systolic": [
+      72.06884533704789,
+      166.2631045624771
+    ],
+    "bilirubin,_total": [
+      -1.8399999999999999,
+      4.4
+    ],
+    "creatinine": [
+      -0.9000000000000001,
+      3.3666666666666667
+    ],
+    "foley": [
+      -93.78571428571428,
+      287.7380952380952
+    ],
+    "gcs_-_eye_opening": [
+      -0.625,
+      6.375
+    ],
+    "gcs_-_motor_response": [
+      1.0,
+      9.0
+    ],
+    "gcs_-_verbal_response": [
+      -2.0,
+      6.0
+    ],
+    "glucose_(serum)": [
+      43.0,
+      219.0
+    ],
+    "heart_rate": [
+      46.46120689655168,
+      127.9899425287357
+    ],
+    "inspired_o2_fraction": [
+      14.285714285714281,
+      82.85714285714286
+    ],
+    "o2_saturation_pulseoxymetry": [
+      91.83493589743595,
+      103.05288461538457
+    ],
+    "platelet_count": [
+      -104.125,
+      502.875
+    ],
+    "respiratory_rate": [
+      6.812500000000002,
+      32.64583333333333
+    ],
+    "temperature_fahrenheit": [
+      95.15,
+      101.95000000000002
+    ],
+    "ph": [
+      7.220000000000001,
+      7.58
+    ],
+    "po2": [
+      4.51785714285711,
+      239.40357142857147
+    ],
+    "map": [
+      50.94005847953215,
+      107.98879142300197
+    ],
+    "sofa": [
+      4.0,
+      20.0
+    ],
+    "isvent_flag": [
+      1.0,
+      1.0
+    ],
+    "gender": [
+      -1.5,
+      2.5
+    ],
+    "age": [
+      21.0,
+      109.0
+    ]
+  },
+  "is_fitted": true
+}
