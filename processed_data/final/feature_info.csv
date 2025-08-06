@@ -1,2 +1,0 @@
-feature_names,n_features
-"['temperature', 'heart_rate', 'respiratory_rate', 'arterial_blood_pressure_systolic', 'arterial_blood_pressure_diastolic', 'o2_saturation_pulseoxymetry', 'glucose_(serum)', 'gcs_-_eye_opening', 'gcs_-_motor_response', 'gcs_-_verbal_response', 'age', 'sofa_score']",12
